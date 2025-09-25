@@ -68,59 +68,95 @@ dp.include_router(router)
 
 # ------------------- DATABASE UTIL -------------------
 async def init_db():
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY,
-                username TEXT,
-                first_name TEXT,
-                last_name TEXT,
-                registered_at TEXT,
-                left_at TEXT
-            )
-        """)
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS invites (
-                invited_id INTEGER PRIMARY KEY,
-                inviter_id INTEGER,
-                method TEXT,  -- 'direct' or 'link'
-                created_at TEXT
-            )
-        """)
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS tokens (
-                token TEXT PRIMARY KEY,
-                inviter_id INTEGER,
-                created_at TEXT
-            )
-        """)
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS settings (
-                key TEXT PRIMARY KEY,
-                value TEXT
-            )
-        """)
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS withdrawals (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
-                amount INTEGER,
-                created_at TEXT,
-                status TEXT  -- pending/paid/rejected
-            )
-        """)
-        await db.commit()
+    try:
+        pool = await aiomysql.create_pool(**MYSQL_CONFIG)
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                # ایجاد جدول users
+                await cur.execute("""
+                    CREATE TABLE IF NOT EXISTS users (
+                        id INT PRIMARY KEY,
+                        username VARCHAR(255),
+                        first_name VARCHAR(255),
+                        last_name VARCHAR(255),
+                        registered_at TEXT,
+                        left_at TEXT
+                    )
+                """)
+                
+                # ایجاد جدول invites
+                await cur.execute("""
+                    CREATE TABLE IF NOT EXISTS invites (
+                        invited_id INT PRIMARY KEY,
+                        inviter_id INT,
+                        method ENUM('direct', 'link'),
+                        created_at TEXT
+                    )
+                """)
+                
+                # ایجاد جدول tokens
+                await cur.execute("""
+                    CREATE TABLE IF NOT EXISTS tokens (
+                        token VARCHAR(255) PRIMARY KEY,
+                        inviter_id INT,
+                        created_at TEXT
+                    )
+                """)
+                
+                # ایجاد جدول settings
+                await cur.execute("""
+                    CREATE TABLE IF NOT EXISTS settings (
+                        `key` VARCHAR(255) PRIMARY KEY,
+                        value TEXT
+                    )
+                """)
+                
+                # ایجاد جدول withdrawals
+                await cur.execute("""
+                    CREATE TABLE IF NOT EXISTS withdrawals (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        user_id INT,
+                        amount INT,
+                        created_at TEXT,
+                        status ENUM('pending', 'paid', 'rejected')
+                    )
+                """)
+                
+                await conn.commit()
+            pool.close()
+        await pool.wait_closed()
+        logger.info("Database initialized successfully")
+    except Exception as e:
+        logger.error(f"Error initializing database: {e}")
 
 async def db_set_setting(key: str, value: str):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value))
-        await db.commit()
+    try:
+        pool = await aiomysql.create_pool(**MYSQL_CONFIG)
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "INSERT INTO settings (`key`, value) VALUES (%s, %s) ON DUPLICATE KEY UPDATE value = %s", 
+                    (key, value, value)
+                )
+                await conn.commit()
+            pool.close()
+        await pool.wait_closed()
+    except Exception as e:
+        logger.error(f"Error setting setting: {e}")
 
-async def db_get_setting(key: str):
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("SELECT value FROM settings WHERE key = ?", (key,)) as cur:
-            row = await cur.fetchone()
-            return row[0] if row else None
+async def db_get_setting(key: str) -> Optional[str]:
+    try:
+        pool = await aiomysql.create_pool(**MYSQL_CONFIG)
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute("SELECT value FROM settings WHERE `key` = %s", (key,))
+                row = await cur.fetchone()
+                return row[0] if row else None
+            pool.close()
+        await pool.wait_closed()
+    except Exception as e:
+        logger.error(f"Error getting setting: {e}")
+        return None
 
 # ------------------- HELPERS -------------------
 def now_iso():
