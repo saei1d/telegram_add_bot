@@ -26,6 +26,7 @@ from aiogram.enums import ParseMode
 from aiogram.types import  InlineKeyboardButton, InlineKeyboardMarkup
 
 from aiogram.client.default import DefaultBotProperties   # اینجا هستش
+from typing import Optional
 from aiogram import Router, F
 from aiogram.filters import Command
 from dotenv import load_dotenv
